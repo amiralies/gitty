@@ -65,7 +65,7 @@ fn run(terminal: &mut Tui) -> Result<()> {
             if let Err(e) = edit_result {
                 app.status_msg = Some(format!("editor failed: {e}"));
             } else {
-                app.refresh()?;
+                app.refresh_keep_selection()?;
             }
             continue;
         }

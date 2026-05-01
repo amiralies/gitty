@@ -104,6 +104,30 @@ impl App {
         Ok(())
     }
 
+    pub fn refresh_keep_selection(&mut self) -> Result<()> {
+        let prev = self.files.get(self.selected).map(|f| (f.path.clone(), f.section));
+        let prev_scroll = self.diff_scroll;
+        self.files = load_status(&self.repo)?;
+        self.diff_cache.clear();
+        if let Some((path, section)) = prev {
+            let new_idx = self
+                .files
+                .iter()
+                .position(|f| f.path == path && f.section == section)
+                .or_else(|| self.files.iter().position(|f| f.path == path));
+            if let Some(i) = new_idx {
+                self.selected = i;
+                self.diff_scroll = prev_scroll;
+                return Ok(());
+            }
+        }
+        if self.selected >= self.files.len() {
+            self.selected = self.files.len().saturating_sub(1);
+        }
+        self.diff_scroll = 0;
+        Ok(())
+    }
+
     pub fn move_down(&mut self) {
         if self.selected + 1 < self.files.len() {
             self.selected += 1;
