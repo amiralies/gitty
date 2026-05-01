@@ -130,6 +130,7 @@ fn draw_changes(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
     let mut items: Vec<ListItem> = Vec::with_capacity(app.files.len() + 2);
     let mut last_section: Option<Section> = None;
     let mut visual_index_of_selected: Option<usize> = None;
+    let max_path = area.width.saturating_sub(6) as usize;
 
     for (i, file) in app.files.iter().enumerate() {
         if last_section != Some(file.section) {
@@ -157,7 +158,7 @@ fn draw_changes(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
                 format!("{} ", file.change.code()),
                 Style::default().fg(color),
             ),
-            Span::raw(file.path.display().to_string()),
+            Span::raw(truncate_path_left(&file.path.display().to_string(), max_path)),
         ]);
         items.push(ListItem::new(line));
     }
@@ -174,6 +175,20 @@ fn draw_changes(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
     let mut state = ListState::default();
     state.select(visual_index_of_selected);
     frame.render_stateful_widget(list, area, &mut state);
+}
+
+fn truncate_path_left(s: &str, max: usize) -> String {
+    if max == 0 {
+        return String::new();
+    }
+    let count = s.chars().count();
+    if count <= max {
+        return s.to_string();
+    }
+    let take = max.saturating_sub(1);
+    let skip = count - take;
+    let tail: String = s.chars().skip(skip).collect();
+    format!("…{tail}")
 }
 
 fn change_color(c: Change) -> Color {
