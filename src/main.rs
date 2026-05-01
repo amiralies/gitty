@@ -1,16 +1,20 @@
+mod app;
+mod git;
+mod ui;
+
 use std::io::{self, Stdout};
 use std::time::Duration;
 
 use anyhow::Result;
-use crossterm::event::{self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode};
+use crossterm::event::{self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEvent};
 use crossterm::execute;
 use crossterm::terminal::{
     EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
 };
 use ratatui::Terminal;
 use ratatui::backend::CrosstermBackend;
-use ratatui::layout::{Constraint, Direction, Layout};
-use ratatui::widgets::{Block, Borders};
+
+use crate::app::App;
 
 type Tui = Terminal<CrosstermBackend<Stdout>>;
 
@@ -40,37 +44,29 @@ fn restore_terminal(terminal: &mut Tui) -> Result<()> {
 }
 
 fn run(terminal: &mut Tui) -> Result<()> {
-    loop {
-        terminal.draw(draw)?;
+    let repo = git::open_repo()?;
+    let mut app = App::new(repo)?;
+
+    while !app.should_quit {
+        terminal.draw(|f| ui::draw(f, &app))?;
         if event::poll(Duration::from_millis(200))?
             && let Event::Key(key) = event::read()?
-            && key.code == KeyCode::Char('q')
         {
-            return Ok(());
+            handle_key(&mut app, key)?;
         }
     }
+    Ok(())
 }
 
-fn draw(frame: &mut ratatui::Frame) {
-    let outer = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Min(1),
-            Constraint::Length(3),
-            Constraint::Length(1),
-        ])
-        .split(frame.area());
-
-    let top = Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([Constraint::Percentage(40), Constraint::Percentage(60)])
-        .split(outer[0]);
-
-    frame.render_widget(Block::default().title("Changes").borders(Borders::ALL), top[0]);
-    frame.render_widget(Block::default().title("Diff").borders(Borders::ALL), top[1]);
-    frame.render_widget(
-        Block::default().title("Commit").borders(Borders::ALL),
-        outer[1],
-    );
-    frame.render_widget(Block::default().title("NORMAL  ? help  q quit"), outer[2]);
+fn handle_key(app: &mut App, key: KeyEvent) -> Result<()> {
+    match key.code {
+        KeyCode::Char('q') => app.should_quit = true,
+        KeyCode::Char('j') | KeyCode::Down => app.move_down(),
+        KeyCode::Char('k') | KeyCode::Up => app.move_up(),
+        KeyCode::Char('g') => app.move_top(),
+        KeyCode::Char('G') => app.move_bottom(),
+        KeyCode::Char('r') => app.refresh()?,
+        _ => {}
+    }
+    Ok(())
 }
