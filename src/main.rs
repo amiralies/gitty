@@ -62,6 +62,7 @@ fn run(terminal: &mut Tui) -> Result<()> {
 
 fn handle_key(app: &mut App, key: KeyEvent) -> Result<()> {
     let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
+    app.status_msg = None;
     match key.code {
         KeyCode::Char('q') => app.should_quit = true,
         KeyCode::Char('d') if ctrl => app.scroll_diff_down(10),

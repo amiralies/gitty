@@ -13,6 +13,7 @@ pub struct App {
     pub should_quit: bool,
     pub diff_cache: HashMap<(PathBuf, Section), String>,
     pub diff_scroll: u16,
+    pub status_msg: Option<String>,
 }
 
 impl App {
@@ -25,6 +26,7 @@ impl App {
             should_quit: false,
             diff_cache: HashMap::new(),
             diff_scroll: 0,
+            status_msg: None,
         })
     }
 

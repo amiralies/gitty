@@ -10,11 +10,7 @@ use crate::git::{Change, Section};
 pub fn draw(frame: &mut Frame, app: &mut App) {
     let outer = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Min(1),
-            Constraint::Length(3),
-            Constraint::Length(1),
-        ])
+        .constraints([Constraint::Min(1), Constraint::Length(1)])
         .split(frame.area());
 
     let top = Layout::default()
@@ -24,11 +20,7 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
 
     draw_changes(frame, app, top[0]);
     draw_diff(frame, app, top[1]);
-    frame.render_widget(
-        Block::default().title("Commit").borders(Borders::ALL),
-        outer[1],
-    );
-    draw_status_bar(frame, app, outer[2]);
+    draw_status_bar(frame, app, outer[1]);
 }
 
 fn draw_diff(frame: &mut Frame, app: &mut App, area: ratatui::layout::Rect) {
@@ -123,11 +115,16 @@ fn change_color(c: Change) -> Color {
 }
 
 fn draw_status_bar(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
+    let trailer = match &app.status_msg {
+        Some(m) => format!("  {m}"),
+        None => "  ? help  q quit".into(),
+    };
     let text = format!(
-        " NORMAL  {}  {} staged  {} unstaged   ? help  q quit",
+        " {}  {} staged  {} unstaged{}",
         app.branch_name(),
         app.staged_count(),
         app.unstaged_count(),
+        trailer,
     );
     frame.render_widget(
         Paragraph::new(text).style(Style::default().bg(Color::DarkGray)),
