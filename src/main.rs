@@ -1,4 +1,5 @@
 mod app;
+mod editor;
 mod git;
 mod ui;
 
@@ -47,10 +48,28 @@ fn restore_terminal(terminal: &mut Tui) -> Result<()> {
 
 fn run(terminal: &mut Tui) -> Result<()> {
     let repo = git::open_repo()?;
+    let workdir = repo
+        .workdir()
+        .ok_or_else(|| anyhow::anyhow!("bare repo"))?
+        .to_path_buf();
     let mut app = App::new(repo)?;
 
     while !app.should_quit {
         terminal.draw(|f| ui::draw(f, &mut app))?;
+
+        if let Some(path) = app.edit_request.take() {
+            restore_terminal(terminal)?;
+            let edit_result = editor::edit_file(&workdir, &path);
+            *terminal = setup_terminal()?;
+            terminal.clear()?;
+            if let Err(e) = edit_result {
+                app.status_msg = Some(format!("editor failed: {e}"));
+            } else {
+                app.refresh()?;
+            }
+            continue;
+        }
+
         if event::poll(Duration::from_millis(200))?
             && let Event::Key(key) = event::read()?
         {
@@ -62,6 +81,10 @@ fn run(terminal: &mut Tui) -> Result<()> {
 
 fn handle_key(app: &mut App, key: KeyEvent) -> Result<()> {
     let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
+    if app.show_help {
+        app.show_help = false;
+        return Ok(());
+    }
     if app.pending.is_some() {
         match key.code {
             KeyCode::Char('y') => app.confirm_yes()?,
@@ -83,6 +106,8 @@ fn handle_key(app: &mut App, key: KeyEvent) -> Result<()> {
         KeyCode::Char('s') => app.stage_selected()?,
         KeyCode::Char('u') if !ctrl => app.unstage_selected()?,
         KeyCode::Char('X') => app.request_discard(),
+        KeyCode::Char('e') if !ctrl => app.request_edit(),
+        KeyCode::Char('?') => app.toggle_help(),
         KeyCode::Char('r') => app.refresh()?,
         _ => {}
     }

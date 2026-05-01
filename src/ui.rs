@@ -2,7 +2,8 @@ use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, List, ListItem, ListState, Paragraph, Wrap};
+use ratatui::layout::Rect;
+use ratatui::widgets::{Block, Borders, Clear, List, ListItem, ListState, Paragraph, Wrap};
 
 use crate::app::App;
 use crate::git::{Change, Section};
@@ -21,6 +22,56 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
     draw_changes(frame, app, top[0]);
     draw_diff(frame, app, top[1]);
     draw_status_bar(frame, app, outer[1]);
+
+    if app.show_help {
+        draw_help(frame, frame.area());
+    }
+}
+
+fn draw_help(frame: &mut Frame, area: Rect) {
+    let lines = vec![
+        Line::from(Span::styled(
+            "Keybindings",
+            Style::default().add_modifier(Modifier::BOLD).fg(Color::Cyan),
+        )),
+        Line::from(""),
+        Line::from("  j / k         move down / up"),
+        Line::from("  g / G         top / bottom"),
+        Line::from("  Ctrl-d / -u   half-page scroll diff"),
+        Line::from("  Ctrl-e / -y   line scroll diff (also Ctrl-n / -p)"),
+        Line::from("  s             stage selected"),
+        Line::from("  u             unstage selected"),
+        Line::from("  X             discard (confirm with y)"),
+        Line::from("  e             edit selected file in $EDITOR"),
+        Line::from("  r             refresh"),
+        Line::from("  ?             toggle this help"),
+        Line::from("  q             quit"),
+        Line::from(""),
+        Line::from(Span::styled(
+            "press any key to close",
+            Style::default().fg(Color::DarkGray),
+        )),
+    ];
+    let popup = centered_rect(60, lines.len() as u16 + 2, area);
+    let para = Paragraph::new(lines).block(
+        Block::default()
+            .title("Help")
+            .borders(Borders::ALL)
+            .style(Style::default().bg(Color::Black)),
+    );
+    frame.render_widget(Clear, popup);
+    frame.render_widget(para, popup);
+}
+
+fn centered_rect(width: u16, height: u16, area: Rect) -> Rect {
+    let w = width.min(area.width.saturating_sub(2));
+    let h = height.min(area.height.saturating_sub(2));
+    Rect {
+        x: area.x + (area.width.saturating_sub(w)) / 2,
+        y: area.y + (area.height.saturating_sub(h)) / 2,
+        width: w,
+        height: h,
+    }
 }
 
 fn draw_diff(frame: &mut Frame, app: &mut App, area: ratatui::layout::Rect) {

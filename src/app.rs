@@ -20,6 +20,8 @@ pub struct App {
     pub diff_scroll: u16,
     pub status_msg: Option<String>,
     pub pending: Option<Confirm>,
+    pub show_help: bool,
+    pub edit_request: Option<PathBuf>,
 }
 
 impl App {
@@ -34,7 +36,24 @@ impl App {
             diff_scroll: 0,
             status_msg: None,
             pending: None,
+            show_help: false,
+            edit_request: None,
         })
+    }
+
+    pub fn toggle_help(&mut self) {
+        self.show_help = !self.show_help;
+    }
+
+    pub fn request_edit(&mut self) {
+        let Some(file) = self.files.get(self.selected) else {
+            return;
+        };
+        if matches!(file.change, crate::git::Change::Deleted) {
+            self.status_msg = Some("file is deleted, nothing to edit".into());
+            return;
+        }
+        self.edit_request = Some(file.path.clone());
     }
 
     pub fn request_discard(&mut self) {
