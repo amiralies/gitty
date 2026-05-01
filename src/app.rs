@@ -4,7 +4,12 @@ use std::path::PathBuf;
 use anyhow::Result;
 use git2::Repository;
 
-use crate::git::{FileEntry, Section, diff_for, load_status, stage, unstage};
+use crate::git::{FileEntry, Section, diff_for, discard, load_status, stage, unstage};
+
+#[derive(Debug, Clone)]
+pub enum Confirm {
+    Discard { path: PathBuf, change: crate::git::Change },
+}
 
 pub struct App {
     pub repo: Repository,
@@ -14,6 +19,7 @@ pub struct App {
     pub diff_cache: HashMap<(PathBuf, Section), String>,
     pub diff_scroll: u16,
     pub status_msg: Option<String>,
+    pub pending: Option<Confirm>,
 }
 
 impl App {
@@ -27,7 +33,46 @@ impl App {
             diff_cache: HashMap::new(),
             diff_scroll: 0,
             status_msg: None,
+            pending: None,
         })
+    }
+
+    pub fn request_discard(&mut self) {
+        let Some(file) = self.files.get(self.selected) else {
+            return;
+        };
+        if file.section != Section::Unstaged {
+            self.status_msg = Some("discard only applies to unstaged changes".into());
+            return;
+        }
+        self.pending = Some(Confirm::Discard {
+            path: file.path.clone(),
+            change: file.change,
+        });
+        self.status_msg = Some(format!(
+            "discard {}? (y/n)",
+            file.path.display()
+        ));
+    }
+
+    pub fn confirm_yes(&mut self) -> Result<()> {
+        let Some(pending) = self.pending.take() else {
+            return Ok(());
+        };
+        match pending {
+            Confirm::Discard { path, change } => {
+                discard(&self.repo, &path, change)?;
+                self.refresh()?;
+                self.status_msg = Some("discarded".into());
+            }
+        }
+        Ok(())
+    }
+
+    pub fn confirm_no(&mut self) {
+        if self.pending.take().is_some() {
+            self.status_msg = Some("cancelled".into());
+        }
     }
 
     pub fn refresh(&mut self) -> Result<()> {

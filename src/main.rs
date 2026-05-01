@@ -62,6 +62,13 @@ fn run(terminal: &mut Tui) -> Result<()> {
 
 fn handle_key(app: &mut App, key: KeyEvent) -> Result<()> {
     let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
+    if app.pending.is_some() {
+        match key.code {
+            KeyCode::Char('y') => app.confirm_yes()?,
+            _ => app.confirm_no(),
+        }
+        return Ok(());
+    }
     app.status_msg = None;
     match key.code {
         KeyCode::Char('q') => app.should_quit = true,
@@ -75,6 +82,7 @@ fn handle_key(app: &mut App, key: KeyEvent) -> Result<()> {
         KeyCode::Char('G') => app.move_bottom(),
         KeyCode::Char('s') => app.stage_selected()?,
         KeyCode::Char('u') if !ctrl => app.unstage_selected()?,
+        KeyCode::Char('X') => app.request_discard(),
         KeyCode::Char('r') => app.refresh()?,
         _ => {}
     }

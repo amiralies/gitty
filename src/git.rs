@@ -3,7 +3,10 @@ use std::path::PathBuf;
 use std::path::Path;
 
 use anyhow::Result;
-use git2::{Diff, DiffOptions, Repository, Status, StatusOptions};
+use git2::{
+    Diff, DiffOptions, Repository, Status, StatusOptions,
+    build::CheckoutBuilder,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Section {
@@ -120,6 +123,25 @@ pub fn stage(repo: &Repository, path: &Path, change: Change) -> Result<()> {
         index.add_path(path)?;
     }
     index.write()?;
+    Ok(())
+}
+
+pub fn discard(repo: &Repository, path: &Path, change: Change) -> Result<()> {
+    if matches!(change, Change::Untracked) {
+        let abs = repo
+            .workdir()
+            .ok_or_else(|| anyhow::anyhow!("bare repo"))?
+            .join(path);
+        if abs.is_dir() {
+            std::fs::remove_dir_all(&abs)?;
+        } else if abs.exists() {
+            std::fs::remove_file(&abs)?;
+        }
+        return Ok(());
+    }
+    let mut opts = CheckoutBuilder::new();
+    opts.force().path(path);
+    repo.checkout_index(None, Some(&mut opts))?;
     Ok(())
 }
 
