@@ -1,9 +1,11 @@
 use std::path::PathBuf;
 
-use anyhow::Result;
-use git2::{Repository, Status, StatusOptions};
+use std::path::Path;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+use anyhow::Result;
+use git2::{Diff, DiffOptions, Repository, Status, StatusOptions};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Section {
     Staged,
     Unstaged,
@@ -108,6 +110,36 @@ fn index_change(s: Status) -> Option<Change> {
     } else {
         None
     }
+}
+
+pub fn diff_for(repo: &Repository, path: &Path, section: Section) -> Result<String> {
+    let mut opts = DiffOptions::new();
+    opts.pathspec(path).include_untracked(true).recurse_untracked_dirs(true);
+
+    let diff = match section {
+        Section::Staged => {
+            let head_tree = repo.head().ok().and_then(|h| h.peel_to_tree().ok());
+            repo.diff_tree_to_index(head_tree.as_ref(), None, Some(&mut opts))?
+        }
+        Section::Unstaged => repo.diff_index_to_workdir(None, Some(&mut opts))?,
+    };
+
+    Ok(render_diff(&diff))
+}
+
+fn render_diff(diff: &Diff) -> String {
+    let mut out = String::new();
+    let _ = diff.print(git2::DiffFormat::Patch, |_delta, _hunk, line| {
+        let origin = line.origin();
+        if matches!(origin, '+' | '-' | ' ') {
+            out.push(origin);
+        }
+        if let Ok(s) = std::str::from_utf8(line.content()) {
+            out.push_str(s);
+        }
+        true
+    });
+    out
 }
 
 fn workdir_change(s: Status) -> Option<Change> {

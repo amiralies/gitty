@@ -6,7 +6,9 @@ use std::io::{self, Stdout};
 use std::time::Duration;
 
 use anyhow::Result;
-use crossterm::event::{self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEvent};
+use crossterm::event::{
+    self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEvent, KeyModifiers,
+};
 use crossterm::execute;
 use crossterm::terminal::{
     EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
@@ -48,7 +50,7 @@ fn run(terminal: &mut Tui) -> Result<()> {
     let mut app = App::new(repo)?;
 
     while !app.should_quit {
-        terminal.draw(|f| ui::draw(f, &app))?;
+        terminal.draw(|f| ui::draw(f, &mut app))?;
         if event::poll(Duration::from_millis(200))?
             && let Event::Key(key) = event::read()?
         {
@@ -59,8 +61,13 @@ fn run(terminal: &mut Tui) -> Result<()> {
 }
 
 fn handle_key(app: &mut App, key: KeyEvent) -> Result<()> {
+    let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
     match key.code {
         KeyCode::Char('q') => app.should_quit = true,
+        KeyCode::Char('d') if ctrl => app.scroll_diff_down(10),
+        KeyCode::Char('u') if ctrl => app.scroll_diff_up(10),
+        KeyCode::Char('e') | KeyCode::Char('n') if ctrl => app.scroll_diff_down(1),
+        KeyCode::Char('y') | KeyCode::Char('p') if ctrl => app.scroll_diff_up(1),
         KeyCode::Char('j') | KeyCode::Down => app.move_down(),
         KeyCode::Char('k') | KeyCode::Up => app.move_up(),
         KeyCode::Char('g') => app.move_top(),

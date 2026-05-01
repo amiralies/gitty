@@ -2,12 +2,12 @@ use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, List, ListItem, ListState, Paragraph};
+use ratatui::widgets::{Block, Borders, List, ListItem, ListState, Paragraph, Wrap};
 
 use crate::app::App;
 use crate::git::{Change, Section};
 
-pub fn draw(frame: &mut Frame, app: &App) {
+pub fn draw(frame: &mut Frame, app: &mut App) {
     let outer = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
@@ -23,12 +23,46 @@ pub fn draw(frame: &mut Frame, app: &App) {
         .split(outer[0]);
 
     draw_changes(frame, app, top[0]);
-    frame.render_widget(Block::default().title("Diff").borders(Borders::ALL), top[1]);
+    draw_diff(frame, app, top[1]);
     frame.render_widget(
         Block::default().title("Commit").borders(Borders::ALL),
         outer[1],
     );
     draw_status_bar(frame, app, outer[2]);
+}
+
+fn draw_diff(frame: &mut Frame, app: &mut App, area: ratatui::layout::Rect) {
+    let title = match app.current() {
+        Some(f) => format!("Diff — {}", f.path.display()),
+        None => "Diff".to_string(),
+    };
+    let scroll = app.diff_scroll;
+    let text = app
+        .current_diff()
+        .map(String::from)
+        .unwrap_or_else(|| "(no selection)".to_string());
+
+    let lines: Vec<Line> = text.lines().map(diff_line).collect();
+    let para = Paragraph::new(lines)
+        .block(Block::default().title(title).borders(Borders::ALL))
+        .wrap(Wrap { trim: false })
+        .scroll((scroll, 0));
+    frame.render_widget(para, area);
+}
+
+fn diff_line(line: &str) -> Line<'_> {
+    let style = if line.starts_with("@@") {
+        Style::default().fg(Color::Cyan)
+    } else if line.starts_with("+++") || line.starts_with("---") {
+        Style::default().add_modifier(Modifier::BOLD)
+    } else if line.starts_with('+') {
+        Style::default().fg(Color::Green)
+    } else if line.starts_with('-') {
+        Style::default().fg(Color::Red)
+    } else {
+        Style::default()
+    };
+    Line::from(Span::styled(line.to_string(), style))
 }
 
 fn draw_changes(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {

@@ -1,13 +1,18 @@
+use std::collections::HashMap;
+use std::path::PathBuf;
+
 use anyhow::Result;
 use git2::Repository;
 
-use crate::git::{FileEntry, Section, load_status};
+use crate::git::{FileEntry, Section, diff_for, load_status};
 
 pub struct App {
     pub repo: Repository,
     pub files: Vec<FileEntry>,
     pub selected: usize,
     pub should_quit: bool,
+    pub diff_cache: HashMap<(PathBuf, Section), String>,
+    pub diff_scroll: u16,
 }
 
 impl App {
@@ -18,6 +23,8 @@ impl App {
             files,
             selected: 0,
             should_quit: false,
+            diff_cache: HashMap::new(),
+            diff_scroll: 0,
         })
     }
 
@@ -26,27 +33,57 @@ impl App {
         if self.selected >= self.files.len() {
             self.selected = self.files.len().saturating_sub(1);
         }
+        self.diff_cache.clear();
+        self.diff_scroll = 0;
         Ok(())
     }
 
     pub fn move_down(&mut self) {
         if self.selected + 1 < self.files.len() {
             self.selected += 1;
+            self.diff_scroll = 0;
         }
     }
 
     pub fn move_up(&mut self) {
         if self.selected > 0 {
             self.selected -= 1;
+            self.diff_scroll = 0;
         }
     }
 
     pub fn move_top(&mut self) {
         self.selected = 0;
+        self.diff_scroll = 0;
     }
 
     pub fn move_bottom(&mut self) {
         self.selected = self.files.len().saturating_sub(1);
+        self.diff_scroll = 0;
+    }
+
+    pub fn current(&self) -> Option<&FileEntry> {
+        self.files.get(self.selected)
+    }
+
+    pub fn current_diff(&mut self) -> Option<&str> {
+        let file = self.files.get(self.selected)?;
+        let key = (file.path.clone(), file.section);
+        if !self.diff_cache.contains_key(&key) {
+            let text = diff_for(&self.repo, &file.path, file.section).unwrap_or_else(|e| {
+                format!("error computing diff: {e}")
+            });
+            self.diff_cache.insert(key.clone(), text);
+        }
+        self.diff_cache.get(&key).map(String::as_str)
+    }
+
+    pub fn scroll_diff_down(&mut self, n: u16) {
+        self.diff_scroll = self.diff_scroll.saturating_add(n);
+    }
+
+    pub fn scroll_diff_up(&mut self, n: u16) {
+        self.diff_scroll = self.diff_scroll.saturating_sub(n);
     }
 
     pub fn staged_count(&self) -> usize {
