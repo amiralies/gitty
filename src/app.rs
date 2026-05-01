@@ -14,6 +14,12 @@ pub enum Confirm {
     },
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Pane {
+    Status,
+    Diff,
+}
+
 pub struct App {
     pub repo: Repository,
     pub files: Vec<FileEntry>,
@@ -25,6 +31,8 @@ pub struct App {
     pub pending: Option<Confirm>,
     pub show_help: bool,
     pub edit_request: Option<PathBuf>,
+    pub focus: Pane,
+    pub pending_g: bool,
 }
 
 impl App {
@@ -41,7 +49,17 @@ impl App {
             pending: None,
             show_help: false,
             edit_request: None,
+            focus: Pane::Status,
+            pending_g: false,
         })
+    }
+
+    pub fn focus_status(&mut self) {
+        self.focus = Pane::Status;
+    }
+
+    pub fn focus_diff(&mut self) {
+        self.focus = Pane::Diff;
     }
 
     pub fn toggle_help(&mut self) {
@@ -145,16 +163,6 @@ impl App {
         }
     }
 
-    pub fn move_top(&mut self) {
-        self.selected = 0;
-        self.diff_scroll = 0;
-    }
-
-    pub fn move_bottom(&mut self) {
-        self.selected = self.files.len().saturating_sub(1);
-        self.diff_scroll = 0;
-    }
-
     pub fn current(&self) -> Option<&FileEntry> {
         self.files.get(self.selected)
     }
@@ -176,6 +184,22 @@ impl App {
 
     pub fn scroll_diff_up(&mut self, n: u16) {
         self.diff_scroll = self.diff_scroll.saturating_sub(n);
+    }
+
+    pub fn scroll_diff_top(&mut self) {
+        self.diff_scroll = 0;
+    }
+
+    pub fn scroll_diff_bottom(&mut self) {
+        let lines = self
+            .current_diff()
+            .map(|d| match d {
+                DiffText::Highlighted(s) | DiffText::Plain(s) => {
+                    s.lines().count()
+                }
+            })
+            .unwrap_or(0);
+        self.diff_scroll = lines.saturating_sub(1).min(u16::MAX as usize) as u16;
     }
 
     pub fn stage_selected(&mut self) -> Result<()> {

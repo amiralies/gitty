@@ -6,7 +6,7 @@ use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::{Block, Borders, Clear, List, ListItem, ListState, Paragraph, Wrap};
 
-use crate::app::App;
+use crate::app::{App, Pane};
 use crate::git::{Change, DiffText, Section};
 
 pub fn draw(frame: &mut Frame, app: &mut App) {
@@ -38,10 +38,10 @@ fn draw_help(frame: &mut Frame, area: Rect) {
                 .fg(Color::Cyan),
         )),
         Line::from(""),
-        Line::from("  j / k         move down / up"),
-        Line::from("  g / G         top / bottom"),
+        Line::from("  h / l (←/→)   focus status / diff pane"),
+        Line::from("  j / k (↓/↑)   move down / up (or scroll diff when focused)"),
+        Line::from("  gg / G        top / bottom of diff (when diff focused)"),
         Line::from("  Ctrl-d / -u   half-page scroll diff"),
-        Line::from("  Ctrl-e / -y   line scroll diff (also Ctrl-n / -p)"),
         Line::from("  s             stage selected"),
         Line::from("  u             unstage selected"),
         Line::from("  X             discard (confirm with y)"),
@@ -51,7 +51,7 @@ fn draw_help(frame: &mut Frame, area: Rect) {
         Line::from("  q             quit"),
         Line::from(""),
         Line::from(Span::styled(
-            "press any key to close",
+            "? / Esc / q to close",
             Style::default().fg(Color::DarkGray),
         )),
     ];
@@ -83,6 +83,7 @@ fn draw_diff(frame: &mut Frame, app: &mut App, area: ratatui::layout::Rect) {
         None => "Diff".to_string(),
     };
     let scroll = app.diff_scroll;
+    let focused = app.focus == Pane::Diff;
     let body: Text = match app.current_diff() {
         Some(DiffText::Highlighted(s)) => s
             .as_bytes()
@@ -92,10 +93,22 @@ fn draw_diff(frame: &mut Frame, app: &mut App, area: ratatui::layout::Rect) {
         None => Text::from("(no selection)"),
     };
     let para = Paragraph::new(body)
-        .block(Block::default().title(title).borders(Borders::ALL))
+        .block(focus_block(title, focused))
         .wrap(Wrap { trim: false })
         .scroll((scroll, 0));
     frame.render_widget(para, area);
+}
+
+fn focus_block<'a, T: Into<ratatui::text::Line<'a>>>(title: T, focused: bool) -> Block<'a> {
+    let style = if focused {
+        Style::default().fg(Color::Cyan)
+    } else {
+        Style::default().fg(Color::DarkGray)
+    };
+    Block::default()
+        .title(title)
+        .borders(Borders::ALL)
+        .border_style(style)
 }
 
 fn diff_line(line: &str) -> Line<'_> {
@@ -149,8 +162,9 @@ fn draw_changes(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
         items.push(ListItem::new(line));
     }
 
+    let focused = app.focus == Pane::Status;
     let list = List::new(items)
-        .block(Block::default().title("Changes").borders(Borders::ALL))
+        .block(focus_block("Changes", focused))
         .highlight_style(
             Style::default()
                 .bg(Color::DarkGray)

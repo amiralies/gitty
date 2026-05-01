@@ -7,9 +7,7 @@ use std::io::{self, Stdout};
 use std::time::Duration;
 
 use anyhow::Result;
-use crossterm::event::{
-    self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEvent, KeyModifiers,
-};
+use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyModifiers};
 use crossterm::execute;
 use crossterm::terminal::{
     EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
@@ -17,7 +15,7 @@ use crossterm::terminal::{
 use ratatui::Terminal;
 use ratatui::backend::CrosstermBackend;
 
-use crate::app::App;
+use crate::app::{App, Pane};
 
 type Tui = Terminal<CrosstermBackend<Stdout>>;
 
@@ -31,17 +29,13 @@ fn main() -> Result<()> {
 fn setup_terminal() -> Result<Tui> {
     enable_raw_mode()?;
     let mut stdout = io::stdout();
-    execute!(stdout, EnterAlternateScreen, EnableMouseCapture)?;
+    execute!(stdout, EnterAlternateScreen)?;
     Ok(Terminal::new(CrosstermBackend::new(stdout))?)
 }
 
 fn restore_terminal(terminal: &mut Tui) -> Result<()> {
     disable_raw_mode()?;
-    execute!(
-        terminal.backend_mut(),
-        LeaveAlternateScreen,
-        DisableMouseCapture
-    )?;
+    execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
     terminal.show_cursor()?;
     Ok(())
 }
@@ -82,7 +76,12 @@ fn run(terminal: &mut Tui) -> Result<()> {
 fn handle_key(app: &mut App, key: KeyEvent) -> Result<()> {
     let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
     if app.show_help {
-        app.show_help = false;
+        if matches!(
+            key.code,
+            KeyCode::Char('?') | KeyCode::Esc | KeyCode::Char('q')
+        ) {
+            app.show_help = false;
+        }
         return Ok(());
     }
     if app.pending.is_some() {
@@ -93,16 +92,35 @@ fn handle_key(app: &mut App, key: KeyEvent) -> Result<()> {
         return Ok(());
     }
     app.status_msg = None;
+
+    if matches!(key.code, KeyCode::Char('g')) && !ctrl {
+        if app.pending_g {
+            app.pending_g = false;
+            if app.focus == Pane::Diff {
+                app.scroll_diff_top();
+            }
+        } else {
+            app.pending_g = true;
+        }
+        return Ok(());
+    }
+    app.pending_g = false;
+
     match key.code {
         KeyCode::Char('q') => app.should_quit = true,
+        KeyCode::Char('h') | KeyCode::Left if !ctrl => app.focus_status(),
+        KeyCode::Char('l') | KeyCode::Right if !ctrl => app.focus_diff(),
         KeyCode::Char('d') if ctrl => app.scroll_diff_down(10),
         KeyCode::Char('u') if ctrl => app.scroll_diff_up(10),
-        KeyCode::Char('e') | KeyCode::Char('n') if ctrl => app.scroll_diff_down(1),
-        KeyCode::Char('y') | KeyCode::Char('p') if ctrl => app.scroll_diff_up(1),
-        KeyCode::Char('j') | KeyCode::Down => app.move_down(),
-        KeyCode::Char('k') | KeyCode::Up => app.move_up(),
-        KeyCode::Char('g') => app.move_top(),
-        KeyCode::Char('G') => app.move_bottom(),
+        KeyCode::Char('j') | KeyCode::Down => match app.focus {
+            Pane::Status => app.move_down(),
+            Pane::Diff => app.scroll_diff_down(1),
+        },
+        KeyCode::Char('k') | KeyCode::Up => match app.focus {
+            Pane::Status => app.move_up(),
+            Pane::Diff => app.scroll_diff_up(1),
+        },
+        KeyCode::Char('G') if app.focus == Pane::Diff => app.scroll_diff_bottom(),
         KeyCode::Char('s') => app.stage_selected()?,
         KeyCode::Char('u') if !ctrl => app.unstage_selected()?,
         KeyCode::Char('X') => app.request_discard(),
