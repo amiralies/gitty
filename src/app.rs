@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use anyhow::Result;
 use git2::Repository;
 
-use crate::git::{FileEntry, Section, diff_for, discard, load_status, stage, unstage};
+use crate::git::{DiffText, FileEntry, Section, diff_for, discard, load_status, stage, unstage};
 
 #[derive(Debug, Clone)]
 pub enum Confirm {
@@ -16,7 +16,7 @@ pub struct App {
     pub files: Vec<FileEntry>,
     pub selected: usize,
     pub should_quit: bool,
-    pub diff_cache: HashMap<(PathBuf, Section), String>,
+    pub diff_cache: HashMap<(PathBuf, Section), DiffText>,
     pub diff_scroll: u16,
     pub status_msg: Option<String>,
     pub pending: Option<Confirm>,
@@ -156,16 +156,16 @@ impl App {
         self.files.get(self.selected)
     }
 
-    pub fn current_diff(&mut self) -> Option<&str> {
+    pub fn current_diff(&mut self) -> Option<&DiffText> {
         let file = self.files.get(self.selected)?;
         let key = (file.path.clone(), file.section);
         if !self.diff_cache.contains_key(&key) {
             let text = diff_for(&self.repo, &file.path, file.section).unwrap_or_else(|e| {
-                format!("error computing diff: {e}")
+                DiffText::Plain(format!("error computing diff: {e}"))
             });
             self.diff_cache.insert(key.clone(), text);
         }
-        self.diff_cache.get(&key).map(String::as_str)
+        self.diff_cache.get(&key)
     }
 
     pub fn scroll_diff_down(&mut self, n: u16) {

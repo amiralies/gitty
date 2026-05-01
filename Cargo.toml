@@ -8,3 +8,4 @@ ratatui = "0.29"
 crossterm = "0.28"
 anyhow = "1"
 git2 = { version = "0.19", default-features = false }
+ansi-to-tui = "7"

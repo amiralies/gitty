@@ -1,12 +1,13 @@
+use ansi_to_tui::IntoText;
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout};
 use ratatui::style::{Color, Modifier, Style};
-use ratatui::text::{Line, Span};
+use ratatui::text::{Line, Span, Text};
 use ratatui::layout::Rect;
 use ratatui::widgets::{Block, Borders, Clear, List, ListItem, ListState, Paragraph, Wrap};
 
 use crate::app::App;
-use crate::git::{Change, Section};
+use crate::git::{Change, DiffText, Section};
 
 pub fn draw(frame: &mut Frame, app: &mut App) {
     let outer = Layout::default()
@@ -80,13 +81,15 @@ fn draw_diff(frame: &mut Frame, app: &mut App, area: ratatui::layout::Rect) {
         None => "Diff".to_string(),
     };
     let scroll = app.diff_scroll;
-    let text = app
-        .current_diff()
-        .map(String::from)
-        .unwrap_or_else(|| "(no selection)".to_string());
-
-    let lines: Vec<Line> = text.lines().map(diff_line).collect();
-    let para = Paragraph::new(lines)
+    let body: Text = match app.current_diff() {
+        Some(DiffText::Highlighted(s)) => s
+            .as_bytes()
+            .into_text()
+            .unwrap_or_else(|_| Text::from(s.clone())),
+        Some(DiffText::Plain(s)) => Text::from(s.lines().map(diff_line).collect::<Vec<_>>()),
+        None => Text::from("(no selection)"),
+    };
+    let para = Paragraph::new(body)
         .block(Block::default().title(title).borders(Borders::ALL))
         .wrap(Wrap { trim: false })
         .scroll((scroll, 0));

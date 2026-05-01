@@ -1,12 +1,20 @@
 use std::path::PathBuf;
 
+use std::io::Write;
 use std::path::Path;
+use std::process::{Command, Stdio};
 
 use anyhow::Result;
 use git2::{
     Diff, DiffOptions, Repository, Status, StatusOptions,
     build::CheckoutBuilder,
 };
+
+#[derive(Debug, Clone)]
+pub enum DiffText {
+    Highlighted(String),
+    Plain(String),
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Section {
@@ -159,7 +167,7 @@ pub fn unstage(repo: &Repository, path: &Path) -> Result<()> {
     Ok(())
 }
 
-pub fn diff_for(repo: &Repository, path: &Path, section: Section) -> Result<String> {
+pub fn diff_for(repo: &Repository, path: &Path, section: Section) -> Result<DiffText> {
     let mut opts = DiffOptions::new();
     opts.pathspec(path)
         .include_untracked(true)
@@ -174,7 +182,33 @@ pub fn diff_for(repo: &Repository, path: &Path, section: Section) -> Result<Stri
         Section::Unstaged => repo.diff_index_to_workdir(None, Some(&mut opts))?,
     };
 
-    Ok(render_diff(&diff))
+    let patch = render_diff(&diff);
+    Ok(match highlight_with_delta(&patch) {
+        Some(out) => DiffText::Highlighted(out),
+        None => DiffText::Plain(patch),
+    })
+}
+
+fn highlight_with_delta(patch: &str) -> Option<String> {
+    let mut child = Command::new("delta")
+        .args([
+            "--color-only",
+            "--paging=never",
+            "--features=",
+            "--file-style=omit",
+            "--hunk-header-style=cyan",
+        ])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .ok()?;
+    child.stdin.as_mut()?.write_all(patch.as_bytes()).ok()?;
+    let output = child.wait_with_output().ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    String::from_utf8(output.stdout).ok()
 }
 
 fn render_diff(diff: &Diff) -> String {
