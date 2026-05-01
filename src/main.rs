@@ -72,6 +72,8 @@ fn handle_key(app: &mut App, key: KeyEvent) -> Result<()> {
         KeyCode::Char('k') | KeyCode::Up => app.move_up(),
         KeyCode::Char('g') => app.move_top(),
         KeyCode::Char('G') => app.move_bottom(),
+        KeyCode::Char('s') => app.stage_selected()?,
+        KeyCode::Char('u') if !ctrl => app.unstage_selected()?,
         KeyCode::Char('r') => app.refresh()?,
         _ => {}
     }

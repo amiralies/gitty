@@ -112,6 +112,31 @@ fn index_change(s: Status) -> Option<Change> {
     }
 }
 
+pub fn stage(repo: &Repository, path: &Path, change: Change) -> Result<()> {
+    let mut index = repo.index()?;
+    if matches!(change, Change::Deleted) {
+        index.remove_path(path)?;
+    } else {
+        index.add_path(path)?;
+    }
+    index.write()?;
+    Ok(())
+}
+
+pub fn unstage(repo: &Repository, path: &Path) -> Result<()> {
+    match repo.head().ok().and_then(|h| h.peel_to_commit().ok()) {
+        Some(commit) => {
+            repo.reset_default(Some(commit.as_object()), [path])?;
+        }
+        None => {
+            let mut index = repo.index()?;
+            index.remove_path(path)?;
+            index.write()?;
+        }
+    }
+    Ok(())
+}
+
 pub fn diff_for(repo: &Repository, path: &Path, section: Section) -> Result<String> {
     let mut opts = DiffOptions::new();
     opts.pathspec(path).include_untracked(true).recurse_untracked_dirs(true);

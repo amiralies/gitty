@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use anyhow::Result;
 use git2::Repository;
 
-use crate::git::{FileEntry, Section, diff_for, load_status};
+use crate::git::{FileEntry, Section, diff_for, load_status, stage, unstage};
 
 pub struct App {
     pub repo: Repository,
@@ -84,6 +84,42 @@ impl App {
 
     pub fn scroll_diff_up(&mut self, n: u16) {
         self.diff_scroll = self.diff_scroll.saturating_sub(n);
+    }
+
+    pub fn stage_selected(&mut self) -> Result<()> {
+        let Some(file) = self.files.get(self.selected).cloned() else {
+            return Ok(());
+        };
+        if file.section != Section::Unstaged {
+            return Ok(());
+        }
+        stage(&self.repo, &file.path, file.change)?;
+        self.refresh_preserving(&file.path, Section::Staged)
+    }
+
+    pub fn unstage_selected(&mut self) -> Result<()> {
+        let Some(file) = self.files.get(self.selected).cloned() else {
+            return Ok(());
+        };
+        if file.section != Section::Staged {
+            return Ok(());
+        }
+        unstage(&self.repo, &file.path)?;
+        self.refresh_preserving(&file.path, Section::Unstaged)
+    }
+
+    fn refresh_preserving(&mut self, path: &std::path::Path, prefer: Section) -> Result<()> {
+        self.files = load_status(&self.repo)?;
+        self.diff_cache.clear();
+        self.diff_scroll = 0;
+        let new_idx = self
+            .files
+            .iter()
+            .position(|f| f.path == path && f.section == prefer)
+            .or_else(|| self.files.iter().position(|f| f.path == path))
+            .unwrap_or(0);
+        self.selected = new_idx.min(self.files.len().saturating_sub(1));
+        Ok(())
     }
 
     pub fn staged_count(&self) -> usize {
