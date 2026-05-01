@@ -161,7 +161,10 @@ pub fn unstage(repo: &Repository, path: &Path) -> Result<()> {
 
 pub fn diff_for(repo: &Repository, path: &Path, section: Section) -> Result<String> {
     let mut opts = DiffOptions::new();
-    opts.pathspec(path).include_untracked(true).recurse_untracked_dirs(true);
+    opts.pathspec(path)
+        .include_untracked(true)
+        .recurse_untracked_dirs(true)
+        .show_untracked_content(true);
 
     let diff = match section {
         Section::Staged => {
