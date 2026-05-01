@@ -8,7 +8,10 @@ use crate::git::{DiffText, FileEntry, Section, diff_for, discard, load_status, s
 
 #[derive(Debug, Clone)]
 pub enum Confirm {
-    Discard { path: PathBuf, change: crate::git::Change },
+    Discard {
+        path: PathBuf,
+        change: crate::git::Change,
+    },
 }
 
 pub struct App {
@@ -68,10 +71,7 @@ impl App {
             path: file.path.clone(),
             change: file.change,
         });
-        self.status_msg = Some(format!(
-            "discard {}? (y/n)",
-            file.path.display()
-        ));
+        self.status_msg = Some(format!("discard {}? (y/n)", file.path.display()));
     }
 
     pub fn confirm_yes(&mut self) -> Result<()> {
@@ -105,7 +105,10 @@ impl App {
     }
 
     pub fn refresh_keep_selection(&mut self) -> Result<()> {
-        let prev = self.files.get(self.selected).map(|f| (f.path.clone(), f.section));
+        let prev = self
+            .files
+            .get(self.selected)
+            .map(|f| (f.path.clone(), f.section));
         let prev_scroll = self.diff_scroll;
         self.files = load_status(&self.repo)?;
         self.diff_cache.clear();
@@ -160,9 +163,8 @@ impl App {
         let file = self.files.get(self.selected)?;
         let key = (file.path.clone(), file.section);
         if !self.diff_cache.contains_key(&key) {
-            let text = diff_for(&self.repo, &file.path, file.section).unwrap_or_else(|e| {
-                DiffText::Plain(format!("error computing diff: {e}"))
-            });
+            let text = diff_for(&self.repo, &file.path, file.section)
+                .unwrap_or_else(|e| DiffText::Plain(format!("error computing diff: {e}")));
             self.diff_cache.insert(key.clone(), text);
         }
         self.diff_cache.get(&key)
@@ -213,11 +215,17 @@ impl App {
     }
 
     pub fn staged_count(&self) -> usize {
-        self.files.iter().filter(|f| f.section == Section::Staged).count()
+        self.files
+            .iter()
+            .filter(|f| f.section == Section::Staged)
+            .count()
     }
 
     pub fn unstaged_count(&self) -> usize {
-        self.files.iter().filter(|f| f.section == Section::Unstaged).count()
+        self.files
+            .iter()
+            .filter(|f| f.section == Section::Unstaged)
+            .count()
     }
 
     pub fn branch_name(&self) -> String {

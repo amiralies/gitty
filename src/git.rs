@@ -5,10 +5,7 @@ use std::path::Path;
 use std::process::{Command, Stdio};
 
 use anyhow::Result;
-use git2::{
-    Diff, DiffOptions, Repository, Status, StatusOptions,
-    build::CheckoutBuilder,
-};
+use git2::{Diff, DiffOptions, Repository, Status, StatusOptions, build::CheckoutBuilder};
 
 #[derive(Debug, Clone)]
 pub enum DiffText {
@@ -101,9 +98,7 @@ pub fn load_status(repo: &Repository) -> Result<Vec<FileEntry>> {
         }
     }
 
-    entries.sort_by(|a, b| {
-        (a.section as u8, &a.path).cmp(&(b.section as u8, &b.path))
-    });
+    entries.sort_by(|a, b| (a.section as u8, &a.path).cmp(&(b.section as u8, &b.path)));
     Ok(entries)
 }
 

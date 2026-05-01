@@ -1,9 +1,9 @@
 use ansi_to_tui::IntoText;
 use ratatui::Frame;
+use ratatui::layout::Rect;
 use ratatui::layout::{Constraint, Direction, Layout};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span, Text};
-use ratatui::layout::Rect;
 use ratatui::widgets::{Block, Borders, Clear, List, ListItem, ListState, Paragraph, Wrap};
 
 use crate::app::App;
@@ -33,7 +33,9 @@ fn draw_help(frame: &mut Frame, area: Rect) {
     let lines = vec![
         Line::from(Span::styled(
             "Keybindings",
-            Style::default().add_modifier(Modifier::BOLD).fg(Color::Cyan),
+            Style::default()
+                .add_modifier(Modifier::BOLD)
+                .fg(Color::Cyan),
         )),
         Line::from(""),
         Line::from("  j / k         move down / up"),
@@ -124,7 +126,9 @@ fn draw_changes(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
             };
             items.push(ListItem::new(Line::from(Span::styled(
                 header,
-                Style::default().add_modifier(Modifier::BOLD).fg(Color::Cyan),
+                Style::default()
+                    .add_modifier(Modifier::BOLD)
+                    .fg(Color::Cyan),
             ))));
             last_section = Some(file.section);
         }
