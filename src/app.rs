@@ -20,6 +20,18 @@ pub enum Pane {
     Diff,
 }
 
+#[derive(Debug, Clone)]
+pub enum Search {
+    Off,
+    Input(String),
+    Active {
+        query: String,
+        matches: std::collections::HashSet<PathBuf>,
+        cursor: usize,
+        order: Vec<usize>,
+    },
+}
+
 pub struct App {
     pub repo: Repository,
     pub files: Vec<FileEntry>,
@@ -33,6 +45,7 @@ pub struct App {
     pub edit_request: Option<PathBuf>,
     pub focus: Pane,
     pub pending_g: bool,
+    pub search: Search,
 }
 
 impl App {
@@ -51,7 +64,111 @@ impl App {
             edit_request: None,
             focus: Pane::Status,
             pending_g: false,
+            search: Search::Off,
         })
+    }
+
+    pub fn search_start(&mut self) {
+        self.search = Search::Input(String::new());
+    }
+
+    pub fn search_input_push(&mut self, c: char) {
+        if let Search::Input(s) = &mut self.search {
+            s.push(c);
+        }
+    }
+
+    pub fn search_input_pop(&mut self) {
+        if let Search::Input(s) = &mut self.search {
+            if s.pop().is_none() {
+                self.search = Search::Off;
+            }
+        }
+    }
+
+    pub fn search_cancel(&mut self) {
+        self.search = Search::Off;
+    }
+
+    pub fn search_submit(&mut self) {
+        let query = match &self.search {
+            Search::Input(s) if !s.is_empty() => s.clone(),
+            _ => {
+                self.search = Search::Off;
+                return;
+            }
+        };
+        let order = find_file_matches(&self.files, &query);
+        if order.is_empty() {
+            self.status_msg = Some(format!("no matches for {query:?}"));
+            self.search = Search::Off;
+            return;
+        }
+        let matches: std::collections::HashSet<PathBuf> =
+            order.iter().map(|&i| self.files[i].path.clone()).collect();
+        let next = next_match_from(&order, self.selected);
+        self.selected = order[next];
+        self.diff_scroll = 0;
+        self.search = Search::Active {
+            query,
+            matches,
+            cursor: next,
+            order,
+        };
+    }
+
+    pub fn search_next(&mut self) {
+        if let Search::Active { order, cursor, .. } = &mut self.search {
+            if order.is_empty() {
+                return;
+            }
+            *cursor = (*cursor + 1) % order.len();
+            self.selected = order[*cursor];
+            self.diff_scroll = 0;
+        }
+    }
+
+    pub fn search_prev(&mut self) {
+        if let Search::Active { order, cursor, .. } = &mut self.search {
+            if order.is_empty() {
+                return;
+            }
+            *cursor = if *cursor == 0 {
+                order.len() - 1
+            } else {
+                *cursor - 1
+            };
+            self.selected = order[*cursor];
+            self.diff_scroll = 0;
+        }
+    }
+
+    fn recompute_search(&mut self) {
+        let query = match &self.search {
+            Search::Active { query, .. } => query.clone(),
+            _ => return,
+        };
+        let order = find_file_matches(&self.files, &query);
+        if order.is_empty() {
+            self.search = Search::Off;
+            return;
+        }
+        let matches: std::collections::HashSet<PathBuf> =
+            order.iter().map(|&i| self.files[i].path.clone()).collect();
+        let cursor = order
+            .iter()
+            .position(|&i| i == self.selected)
+            .unwrap_or(0);
+        self.search = Search::Active {
+            query,
+            matches,
+            cursor,
+            order,
+        };
+    }
+
+    pub fn is_match(&self, path: &std::path::Path) -> bool {
+        matches!(&self.search, Search::Active { matches, .. } if matches.contains(path))
     }
 
     pub fn focus_status(&mut self) {
@@ -119,6 +236,7 @@ impl App {
         }
         self.diff_cache.clear();
         self.diff_scroll = 0;
+        self.recompute_search();
         Ok(())
     }
 
@@ -252,11 +370,32 @@ impl App {
             .count()
     }
 
-    pub fn branch_name(&self) -> String {
+pub fn branch_name(&self) -> String {
         self.repo
             .head()
             .ok()
             .and_then(|h| h.shorthand().map(String::from))
             .unwrap_or_else(|| "HEAD".into())
     }
+}
+
+fn find_file_matches(files: &[FileEntry], query: &str) -> Vec<usize> {
+    let smart_lower = query.chars().all(|c| !c.is_uppercase());
+    let needle = if smart_lower { query.to_lowercase() } else { query.to_string() };
+    files
+        .iter()
+        .enumerate()
+        .filter_map(|(i, f)| {
+            let path = f.path.display().to_string();
+            let hay = if smart_lower { path.to_lowercase() } else { path };
+            hay.contains(&needle).then_some(i)
+        })
+        .collect()
+}
+
+fn next_match_from(order: &[usize], current: usize) -> usize {
+    order
+        .iter()
+        .position(|&i| i >= current)
+        .unwrap_or(0)
 }

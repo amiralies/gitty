@@ -6,7 +6,7 @@ use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::{Block, Borders, Clear, List, ListItem, ListState, Paragraph, Wrap};
 
-use crate::app::{App, Pane};
+use crate::app::{App, Pane, Search};
 use crate::git::{Change, DiffText, Section};
 
 pub fn draw(frame: &mut Frame, app: &mut App) {
@@ -45,6 +45,8 @@ fn draw_help(frame: &mut Frame, area: Rect) {
         Line::from("  s             stage selected"),
         Line::from("  u             unstage selected"),
         Line::from("  X             discard (confirm with y)"),
+        Line::from("  / n N         search file names / next / prev"),
+        Line::from("  Esc / \\       clear search highlight"),
         Line::from("  e             edit selected file in $EDITOR"),
         Line::from("  r             refresh"),
         Line::from("  ?             toggle this help"),
@@ -152,13 +154,19 @@ fn draw_changes(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
         }
 
         let color = change_color(file.change);
+        let path_text = truncate_path_left(&file.path.display().to_string(), max_path);
+        let path_style = if app.is_match(&file.path) {
+            Style::default().bg(Color::Yellow).fg(Color::Black)
+        } else {
+            Style::default()
+        };
         let line = Line::from(vec![
             Span::raw("  "),
             Span::styled(
                 format!("{} ", file.change.code()),
                 Style::default().fg(color),
             ),
-            Span::raw(truncate_path_left(&file.path.display().to_string(), max_path)),
+            Span::styled(path_text, path_style),
         ]);
         items.push(ListItem::new(line));
     }
@@ -202,17 +210,27 @@ fn change_color(c: Change) -> Color {
 }
 
 fn draw_status_bar(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
-    let trailer = match &app.status_msg {
-        Some(m) => format!("  {m}"),
-        None => "  ? help  q quit".into(),
+    let text = match &app.search {
+        Search::Input(q) => format!("/{q}▏"),
+        Search::Active { query, order, cursor, .. } => format!(
+            " /{query}  [{}/{}]  n next  N prev  Esc clear",
+            cursor + 1,
+            order.len()
+        ),
+        Search::Off => {
+            let trailer = match &app.status_msg {
+                Some(m) => format!("  {m}"),
+                None => "  ? help  q quit".into(),
+            };
+            format!(
+                " {}  {} staged  {} unstaged{}",
+                app.branch_name(),
+                app.staged_count(),
+                app.unstaged_count(),
+                trailer,
+            )
+        }
     };
-    let text = format!(
-        " {}  {} staged  {} unstaged{}",
-        app.branch_name(),
-        app.staged_count(),
-        app.unstaged_count(),
-        trailer,
-    );
     frame.render_widget(
         Paragraph::new(text).style(Style::default().bg(Color::DarkGray)),
         area,

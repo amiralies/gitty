@@ -15,7 +15,7 @@ use crossterm::terminal::{
 use ratatui::Terminal;
 use ratatui::backend::CrosstermBackend;
 
-use crate::app::{App, Pane};
+use crate::app::{App, Pane, Search};
 
 type Tui = Terminal<CrosstermBackend<Stdout>>;
 
@@ -75,6 +75,16 @@ fn run(terminal: &mut Tui) -> Result<()> {
 
 fn handle_key(app: &mut App, key: KeyEvent) -> Result<()> {
     let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
+    if matches!(app.search, Search::Input(_)) {
+        match key.code {
+            KeyCode::Esc => app.search_cancel(),
+            KeyCode::Enter => app.search_submit(),
+            KeyCode::Backspace => app.search_input_pop(),
+            KeyCode::Char(c) => app.search_input_push(c),
+            _ => {}
+        }
+        return Ok(());
+    }
     if app.show_help {
         if matches!(
             key.code,
@@ -126,6 +136,10 @@ fn handle_key(app: &mut App, key: KeyEvent) -> Result<()> {
         KeyCode::Char('X') => app.request_discard(),
         KeyCode::Char('e') if !ctrl => app.request_edit(),
         KeyCode::Char('?') => app.toggle_help(),
+        KeyCode::Char('/') => app.search_start(),
+        KeyCode::Char('n') if !ctrl => app.search_next(),
+        KeyCode::Char('N') => app.search_prev(),
+        KeyCode::Esc | KeyCode::Char('\\') => app.search_cancel(),
         KeyCode::Char('r') => app.refresh()?,
         _ => {}
     }
