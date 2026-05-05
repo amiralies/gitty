@@ -79,11 +79,10 @@ impl App {
     }
 
     pub fn search_input_pop(&mut self) {
-        if let Search::Input(s) = &mut self.search {
-            if s.pop().is_none() {
+        if let Search::Input(s) = &mut self.search
+            && s.pop().is_none() {
                 self.search = Search::Off;
             }
-        }
     }
 
     pub fn search_cancel(&mut self) {
