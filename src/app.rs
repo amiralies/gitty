@@ -155,10 +155,7 @@ impl App {
         }
         let matches: std::collections::HashSet<PathBuf> =
             order.iter().map(|&i| self.files[i].path.clone()).collect();
-        let cursor = order
-            .iter()
-            .position(|&i| i == self.selected)
-            .unwrap_or(0);
+        let cursor = order.iter().position(|&i| i == self.selected).unwrap_or(0);
         self.search = Search::Active {
             query,
             matches,
@@ -312,9 +309,7 @@ impl App {
         let lines = self
             .current_diff()
             .map(|d| match d {
-                DiffText::Highlighted(s) | DiffText::Plain(s) => {
-                    s.lines().count()
-                }
+                DiffText::Highlighted(s) | DiffText::Plain(s) => s.lines().count(),
             })
             .unwrap_or(0);
         self.diff_scroll = lines.saturating_sub(1).min(u16::MAX as usize) as u16;
@@ -393,7 +388,7 @@ impl App {
             .count()
     }
 
-pub fn branch_name(&self) -> String {
+    pub fn branch_name(&self) -> String {
         self.repo
             .head()
             .ok()
@@ -404,21 +399,26 @@ pub fn branch_name(&self) -> String {
 
 fn find_file_matches(files: &[FileEntry], query: &str) -> Vec<usize> {
     let smart_lower = query.chars().all(|c| !c.is_uppercase());
-    let needle = if smart_lower { query.to_lowercase() } else { query.to_string() };
+    let needle = if smart_lower {
+        query.to_lowercase()
+    } else {
+        query.to_string()
+    };
     files
         .iter()
         .enumerate()
         .filter_map(|(i, f)| {
             let path = f.path.display().to_string();
-            let hay = if smart_lower { path.to_lowercase() } else { path };
+            let hay = if smart_lower {
+                path.to_lowercase()
+            } else {
+                path
+            };
             hay.contains(&needle).then_some(i)
         })
         .collect()
 }
 
 fn next_match_from(order: &[usize], current: usize) -> usize {
-    order
-        .iter()
-        .position(|&i| i >= current)
-        .unwrap_or(0)
+    order.iter().position(|&i| i >= current).unwrap_or(0)
 }

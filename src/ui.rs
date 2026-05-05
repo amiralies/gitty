@@ -212,7 +212,12 @@ fn change_color(c: Change) -> Color {
 fn draw_status_bar(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
     let text = match &app.search {
         Search::Input(q) => format!("/{q}▏"),
-        Search::Active { query, order, cursor, .. } => format!(
+        Search::Active {
+            query,
+            order,
+            cursor,
+            ..
+        } => format!(
             " /{query}  [{}/{}]  n next  N prev  Esc clear",
             cursor + 1,
             order.len()
