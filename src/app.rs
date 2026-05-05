@@ -327,8 +327,9 @@ impl App {
         if file.section != Section::Unstaged {
             return Ok(());
         }
+        let within = self.index_within_section();
         stage(&self.repo, &file.path, file.change)?;
-        self.refresh_preserving(&file.path, Section::Staged)
+        self.refresh_advancing(Section::Unstaged, within)
     }
 
     pub fn unstage_selected(&mut self) -> Result<()> {
@@ -338,20 +339,42 @@ impl App {
         if file.section != Section::Staged {
             return Ok(());
         }
+        let within = self.index_within_section();
         unstage(&self.repo, &file.path)?;
-        self.refresh_preserving(&file.path, Section::Unstaged)
+        self.refresh_advancing(Section::Staged, within)
     }
 
-    fn refresh_preserving(&mut self, path: &std::path::Path, prefer: Section) -> Result<()> {
+    fn index_within_section(&self) -> usize {
+        let Some(file) = self.files.get(self.selected) else {
+            return 0;
+        };
+        self.files[..self.selected]
+            .iter()
+            .filter(|f| f.section == file.section)
+            .count()
+    }
+
+    fn refresh_advancing(&mut self, from: Section, within: usize) -> Result<()> {
         self.files = load_status(&self.repo)?;
         self.diff_cache.clear();
         self.diff_scroll = 0;
-        let new_idx = self
+
+        let in_section: Vec<usize> = self
             .files
             .iter()
-            .position(|f| f.path == path && f.section == prefer)
-            .or_else(|| self.files.iter().position(|f| f.path == path))
-            .unwrap_or(0);
+            .enumerate()
+            .filter_map(|(i, f)| (f.section == from).then_some(i))
+            .collect();
+
+        let new_idx = if !in_section.is_empty() {
+            in_section[within.min(in_section.len() - 1)]
+        } else {
+            self.files
+                .iter()
+                .position(|f| f.section != from)
+                .unwrap_or(0)
+        };
+
         self.selected = new_idx.min(self.files.len().saturating_sub(1));
         Ok(())
     }
