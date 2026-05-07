@@ -20,10 +20,32 @@ use crate::app::{App, Pane, Search};
 type Tui = Terminal<CrosstermBackend<Stdout>>;
 
 fn main() -> Result<()> {
+    let revspec = match parse_args() {
+        Ok(spec) => spec,
+        Err(msg) => {
+            eprintln!("{msg}");
+            std::process::exit(2);
+        }
+    };
+    let repo = git::open_repo()?;
+    let app = match revspec {
+        Some(spec) => App::new_review(repo, spec)?,
+        None => App::new(repo)?,
+    };
     let mut terminal = setup_terminal()?;
-    let res = run(&mut terminal);
+    let res = run(&mut terminal, app);
     restore_terminal(&mut terminal)?;
     res
+}
+
+fn parse_args() -> Result<Option<String>, String> {
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    match args.as_slice() {
+        [] => Ok(None),
+        [s] if !s.starts_with('-') => Ok(Some(s.clone())),
+        [flag, s] if flag == "-r" || flag == "--revisions" => Ok(Some(s.clone())),
+        _ => Err("Usage: gitty [<revspec>]\n       gitty -r <revspec>".into()),
+    }
 }
 
 fn setup_terminal() -> Result<Tui> {
@@ -40,13 +62,12 @@ fn restore_terminal(terminal: &mut Tui) -> Result<()> {
     Ok(())
 }
 
-fn run(terminal: &mut Tui) -> Result<()> {
-    let repo = git::open_repo()?;
-    let workdir = repo
+fn run(terminal: &mut Tui, mut app: App) -> Result<()> {
+    let workdir = app
+        .repo
         .workdir()
         .ok_or_else(|| anyhow::anyhow!("bare repo"))?
         .to_path_buf();
-    let mut app = App::new(repo)?;
 
     while !app.should_quit {
         terminal.draw(|f| ui::draw(f, &mut app))?;
@@ -117,7 +138,7 @@ fn handle_key(app: &mut App, key: KeyEvent) -> Result<()> {
     app.pending_g = false;
 
     match key.code {
-        KeyCode::Char('q') => app.should_quit = true,
+        KeyCode::Char('q') => app.request_quit(),
         KeyCode::Char('h') | KeyCode::Left if !ctrl => app.focus_status(),
         KeyCode::Char('l') | KeyCode::Right if !ctrl => app.focus_diff(),
         KeyCode::Char('d') if ctrl => app.scroll_diff_down(10),
@@ -135,6 +156,7 @@ fn handle_key(app: &mut App, key: KeyEvent) -> Result<()> {
         KeyCode::Char('u') if !ctrl => app.unstage_selected()?,
         KeyCode::Char('X') => app.request_discard(),
         KeyCode::Char('e') if !ctrl => app.request_edit(),
+        KeyCode::Char(' ') => app.toggle_reviewed(),
         KeyCode::Char('?') => app.toggle_help(),
         KeyCode::Char('/') => app.search_start(),
         KeyCode::Char('n') if !ctrl => app.search_next(),

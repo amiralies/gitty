@@ -6,7 +6,7 @@ use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::{Block, Borders, Clear, List, ListItem, ListState, Paragraph, Wrap};
 
-use crate::app::{App, Pane, Search};
+use crate::app::{App, Mode, Pane, Search};
 use crate::git::{Change, DiffText, Section};
 
 pub fn draw(frame: &mut Frame, app: &mut App) {
@@ -25,12 +25,12 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
     draw_status_bar(frame, app, outer[1]);
 
     if app.show_help {
-        draw_help(frame, frame.area());
+        draw_help(frame, frame.area(), app.is_review());
     }
 }
 
-fn draw_help(frame: &mut Frame, area: Rect) {
-    let lines = vec![
+fn draw_help(frame: &mut Frame, area: Rect, review: bool) {
+    let mut lines = vec![
         Line::from(Span::styled(
             "Keybindings",
             Style::default()
@@ -42,21 +42,35 @@ fn draw_help(frame: &mut Frame, area: Rect) {
         Line::from("  j / k (↓/↑)   move down / up (or scroll diff when focused)"),
         Line::from("  gg / G        top / bottom of diff (when diff focused)"),
         Line::from("  Ctrl-d / -u   half-page scroll diff"),
-        Line::from("  s             stage selected"),
-        Line::from("  u             unstage selected"),
-        Line::from("  X             discard (confirm with y)"),
-        Line::from("  / n N         search file names / next / prev"),
-        Line::from("  Esc / \\       clear search highlight"),
-        Line::from("  e             edit selected file in $EDITOR"),
-        Line::from("  r             refresh"),
-        Line::from("  ?             toggle this help"),
-        Line::from("  q             quit"),
-        Line::from(""),
-        Line::from(Span::styled(
-            "? / Esc / q to close",
-            Style::default().fg(Color::DarkGray),
-        )),
     ];
+    if !review {
+        lines.push(Line::from("  s             stage selected"));
+        lines.push(Line::from("  u             unstage selected"));
+        lines.push(Line::from("  X             discard (confirm with y)"));
+    }
+    lines.push(Line::from("  / n N         search file names / next / prev"));
+    lines.push(Line::from("  Esc / \\       clear search highlight"));
+    if review {
+        lines.push(Line::from("  Space         toggle reviewed"));
+    }
+    if !review {
+        lines.push(Line::from("  e             edit selected file in $EDITOR"));
+    }
+    lines.push(Line::from("  r             refresh"));
+    lines.push(Line::from("  ?             toggle this help"));
+    lines.push(Line::from("  q             quit"));
+    lines.push(Line::from(""));
+    if review {
+        lines.push(Line::from(Span::styled(
+            "review mode is read-only",
+            Style::default().fg(Color::DarkGray),
+        )));
+    }
+    lines.push(Line::from(Span::styled(
+        "? / Esc / q to close",
+        Style::default().fg(Color::DarkGray),
+    )));
+
     let popup = centered_rect(60, lines.len() as u16 + 2, area);
     let para = Paragraph::new(lines).block(
         Block::default()
@@ -134,18 +148,28 @@ fn draw_changes(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
     let mut visual_index_of_selected: Option<usize> = None;
     let max_path = area.width.saturating_sub(6) as usize;
 
+    let review = app.is_review();
+    let max_path = if review {
+        max_path.saturating_sub(4)
+    } else {
+        max_path
+    };
+
     for (i, file) in app.files.iter().enumerate() {
         if last_section != Some(file.section) {
             let header = match file.section {
-                Section::Staged => "Staged",
-                Section::Unstaged => "Changes",
+                Section::Staged => Some("Staged"),
+                Section::Unstaged => Some("Changes"),
+                Section::Review => None,
             };
-            items.push(ListItem::new(Line::from(Span::styled(
-                header,
-                Style::default()
-                    .add_modifier(Modifier::BOLD)
-                    .fg(Color::Cyan),
-            ))));
+            if let Some(h) = header {
+                items.push(ListItem::new(Line::from(Span::styled(
+                    h,
+                    Style::default()
+                        .add_modifier(Modifier::BOLD)
+                        .fg(Color::Cyan),
+                ))));
+            }
             last_section = Some(file.section);
         }
 
@@ -153,27 +177,50 @@ fn draw_changes(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
             visual_index_of_selected = Some(items.len());
         }
 
+        let reviewed = review && app.is_reviewed(&file.path);
+        let is_selected = i == app.selected;
         let color = change_color(file.change);
-        let path_text = truncate_path_left(&file.path.display().to_string(), max_path);
+        let display = match &file.old_path {
+            Some(old) => format!("{} → {}", old.display(), file.path.display()),
+            None => file.path.display().to_string(),
+        };
+        let path_text = truncate_path_left(&display, max_path);
         let path_style = if app.is_match(&file.path) {
             Style::default().bg(Color::Yellow).fg(Color::Black)
+        } else if reviewed {
+            let mut s = Style::default().add_modifier(Modifier::CROSSED_OUT);
+            if !is_selected {
+                s = s.fg(Color::DarkGray);
+            }
+            s
         } else {
             Style::default()
         };
-        let line = Line::from(vec![
-            Span::raw("  "),
-            Span::styled(
-                format!("{} ", file.change.code()),
-                Style::default().fg(color),
-            ),
-            Span::styled(path_text, path_style),
-        ]);
-        items.push(ListItem::new(line));
+        let code_style = if reviewed && !is_selected {
+            Style::default().fg(Color::DarkGray)
+        } else {
+            Style::default().fg(color)
+        };
+        let mut spans = vec![Span::raw("  ")];
+        if review {
+            let (mark, mark_style) = if reviewed {
+                ("[x] ", Style::default().fg(Color::Green))
+            } else if is_selected {
+                ("[ ] ", Style::default())
+            } else {
+                ("[ ] ", Style::default().fg(Color::DarkGray))
+            };
+            spans.push(Span::styled(mark, mark_style));
+        }
+        spans.push(Span::styled(format!("{} ", file.change.code()), code_style));
+        spans.push(Span::styled(path_text, path_style));
+        items.push(ListItem::new(Line::from(spans)));
     }
 
     let focused = app.focus == Pane::Status;
+    let title = if app.is_review() { "Review" } else { "Changes" };
     let list = List::new(items)
-        .block(focus_block("Changes", focused))
+        .block(focus_block(title, focused))
         .highlight_style(
             Style::default()
                 .bg(Color::DarkGray)
@@ -227,13 +274,22 @@ fn draw_status_bar(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
                 Some(m) => format!("  {m}"),
                 None => "  ? help  q quit".into(),
             };
-            format!(
-                " {}  {} staged  {} unstaged{}",
-                app.branch_name(),
-                app.staged_count(),
-                app.unstaged_count(),
-                trailer,
-            )
+            match &app.mode {
+                Mode::Review { spec, .. } => format!(
+                    " review · {}  {}/{} reviewed{}",
+                    spec,
+                    app.reviewed_count(),
+                    app.files.len(),
+                    trailer,
+                ),
+                Mode::Status => format!(
+                    " {}  {} staged  {} unstaged{}",
+                    app.branch_name(),
+                    app.staged_count(),
+                    app.unstaged_count(),
+                    trailer,
+                ),
+            }
         }
     };
     frame.render_widget(

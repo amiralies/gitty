@@ -5,7 +5,10 @@ use std::path::Path;
 use std::process::{Command, Stdio};
 
 use anyhow::Result;
-use git2::{Diff, DiffOptions, Repository, Status, StatusOptions, build::CheckoutBuilder};
+use git2::{
+    Delta, Diff, DiffFindOptions, DiffOptions, Oid, Repository, RevparseMode, Status,
+    StatusOptions, build::CheckoutBuilder,
+};
 
 #[derive(Debug, Clone)]
 pub enum DiffText {
@@ -17,6 +20,7 @@ pub enum DiffText {
 pub enum Section {
     Staged,
     Unstaged,
+    Review,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -47,6 +51,7 @@ impl Change {
 #[derive(Debug, Clone)]
 pub struct FileEntry {
     pub path: PathBuf,
+    pub old_path: Option<PathBuf>,
     pub change: Change,
     pub section: Section,
 }
@@ -75,6 +80,7 @@ pub fn load_status(repo: &Repository) -> Result<Vec<FileEntry>> {
         if s.contains(Status::CONFLICTED) {
             entries.push(FileEntry {
                 path: path.clone(),
+                old_path: None,
                 change: Change::Conflicted,
                 section: Section::Unstaged,
             });
@@ -84,6 +90,7 @@ pub fn load_status(repo: &Repository) -> Result<Vec<FileEntry>> {
         if let Some(c) = index_change(s) {
             entries.push(FileEntry {
                 path: path.clone(),
+                old_path: None,
                 change: c,
                 section: Section::Staged,
             });
@@ -92,6 +99,7 @@ pub fn load_status(repo: &Repository) -> Result<Vec<FileEntry>> {
         if let Some(c) = workdir_change(s) {
             entries.push(FileEntry {
                 path,
+                old_path: None,
                 change: c,
                 section: Section::Unstaged,
             });
@@ -175,6 +183,7 @@ pub fn diff_for(repo: &Repository, path: &Path, section: Section) -> Result<Diff
             repo.diff_tree_to_index(head_tree.as_ref(), None, Some(&mut opts))?
         }
         Section::Unstaged => repo.diff_index_to_workdir(None, Some(&mut opts))?,
+        Section::Review => return Err(anyhow::anyhow!("review section uses diff_for_review")),
     };
 
     let patch = render_diff(&diff);
@@ -182,6 +191,131 @@ pub fn diff_for(repo: &Repository, path: &Path, section: Section) -> Result<Diff
         Some(out) => DiffText::Highlighted(out),
         None => DiffText::Plain(patch),
     })
+}
+
+pub fn load_review(repo: &Repository, spec: &str) -> Result<(Oid, Oid, Vec<FileEntry>)> {
+    let (left_tree_id, right_tree_id) = resolve_review_trees(repo, spec)?;
+    let left_tree = repo.find_tree(left_tree_id)?;
+    let right_tree = repo.find_tree(right_tree_id)?;
+
+    let mut opts = DiffOptions::new();
+    let mut diff =
+        repo.diff_tree_to_tree(Some(&left_tree), Some(&right_tree), Some(&mut opts))?;
+    let mut find_opts = DiffFindOptions::new();
+    find_opts.renames(true).copies(false);
+    diff.find_similar(Some(&mut find_opts))?;
+
+    let mut entries = Vec::new();
+    for delta in diff.deltas() {
+        let status = delta.status();
+        let change = match status {
+            Delta::Added => Change::Added,
+            Delta::Deleted => Change::Deleted,
+            Delta::Modified => Change::Modified,
+            Delta::Renamed => Change::Renamed,
+            Delta::Typechange => Change::Typechange,
+            Delta::Copied => Change::Modified,
+            _ => continue,
+        };
+        let new_path = delta.new_file().path().map(PathBuf::from);
+        let old_path = delta.old_file().path().map(PathBuf::from);
+        let path = match status {
+            Delta::Deleted => match old_path.clone() {
+                Some(p) => p,
+                None => continue,
+            },
+            _ => match new_path.clone() {
+                Some(p) => p,
+                None => match old_path.clone() {
+                    Some(p) => p,
+                    None => continue,
+                },
+            },
+        };
+        let old_path = if matches!(status, Delta::Renamed | Delta::Copied) {
+            old_path.filter(|p| Some(p) != new_path.as_ref())
+        } else {
+            None
+        };
+        entries.push(FileEntry {
+            path,
+            old_path,
+            change,
+            section: Section::Review,
+        });
+    }
+
+    entries.sort_by(|a, b| a.path.cmp(&b.path));
+    Ok((left_tree_id, right_tree_id, entries))
+}
+
+pub fn diff_for_review(
+    repo: &Repository,
+    file: &FileEntry,
+    left: Oid,
+    right: Oid,
+) -> Result<DiffText> {
+    let left_tree = repo.find_tree(left)?;
+    let right_tree = repo.find_tree(right)?;
+
+    let mut opts = DiffOptions::new();
+    opts.pathspec(file.path.as_path());
+    if let Some(old) = &file.old_path {
+        opts.pathspec(old.as_path());
+    }
+    let mut diff =
+        repo.diff_tree_to_tree(Some(&left_tree), Some(&right_tree), Some(&mut opts))?;
+    let mut find_opts = DiffFindOptions::new();
+    find_opts.renames(true).copies(false);
+    diff.find_similar(Some(&mut find_opts))?;
+
+    let patch = render_diff(&diff);
+    Ok(match highlight_with_delta(&patch) {
+        Some(out) => DiffText::Highlighted(out),
+        None => DiffText::Plain(patch),
+    })
+}
+
+fn resolve_review_trees(repo: &Repository, spec: &str) -> Result<(Oid, Oid)> {
+    let rs = repo.revparse(spec)?;
+    let mode = rs.mode();
+    if mode.contains(RevparseMode::MERGE_BASE) {
+        let from = rs
+            .from()
+            .ok_or_else(|| anyhow::anyhow!("revspec {spec:?} missing left side"))?;
+        let to = rs
+            .to()
+            .ok_or_else(|| anyhow::anyhow!("revspec {spec:?} missing right side"))?;
+        let from_commit = from.peel_to_commit()?;
+        let to_commit = to.peel_to_commit()?;
+        let base = repo.merge_base(from_commit.id(), to_commit.id())?;
+        let base_commit = repo.find_commit(base)?;
+        Ok((base_commit.tree_id(), to_commit.tree_id()))
+    } else if mode.contains(RevparseMode::RANGE) {
+        let from = rs
+            .from()
+            .ok_or_else(|| anyhow::anyhow!("revspec {spec:?} missing left side"))?;
+        let to = rs
+            .to()
+            .ok_or_else(|| anyhow::anyhow!("revspec {spec:?} missing right side"))?;
+        Ok((from.peel_to_commit()?.tree_id(), to.peel_to_commit()?.tree_id()))
+    } else {
+        let only = rs
+            .from()
+            .ok_or_else(|| anyhow::anyhow!("could not resolve {spec:?}"))?;
+        let commit = only.peel_to_commit()?;
+        let right = commit.tree_id();
+        let left = if commit.parent_count() > 0 {
+            commit.parent(0)?.tree_id()
+        } else {
+            empty_tree_oid(repo)?
+        };
+        Ok((left, right))
+    }
+}
+
+fn empty_tree_oid(repo: &Repository) -> Result<Oid> {
+    Ok(repo.treebuilder(None)?.write()?)
 }
 
 fn highlight_with_delta(patch: &str) -> Option<String> {

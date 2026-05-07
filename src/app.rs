@@ -1,10 +1,13 @@
-use std::collections::HashMap;
-use std::path::PathBuf;
+use std::collections::{HashMap, HashSet};
+use std::path::{Path, PathBuf};
 
 use anyhow::Result;
-use git2::Repository;
+use git2::{Oid, Repository};
 
-use crate::git::{DiffText, FileEntry, Section, diff_for, discard, load_status, stage, unstage};
+use crate::git::{
+    DiffText, FileEntry, Section, diff_for, diff_for_review, discard, load_review, load_status,
+    stage, unstage,
+};
 
 #[derive(Debug, Clone)]
 pub enum Confirm {
@@ -12,12 +15,19 @@ pub enum Confirm {
         path: PathBuf,
         change: crate::git::Change,
     },
+    Quit,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Pane {
     Status,
     Diff,
+}
+
+#[derive(Debug, Clone)]
+pub enum Mode {
+    Status,
+    Review { spec: String, left: Oid, right: Oid },
 }
 
 #[derive(Debug, Clone)]
@@ -46,6 +56,8 @@ pub struct App {
     pub focus: Pane,
     pub pending_g: bool,
     pub search: Search,
+    pub mode: Mode,
+    pub reviewed: HashSet<PathBuf>,
 }
 
 impl App {
@@ -65,7 +77,58 @@ impl App {
             focus: Pane::Status,
             pending_g: false,
             search: Search::Off,
+            mode: Mode::Status,
+            reviewed: HashSet::new(),
         })
+    }
+
+    pub fn new_review(repo: Repository, spec: String) -> Result<Self> {
+        let (left, right, files) = load_review(&repo, &spec)?;
+        Ok(Self {
+            repo,
+            files,
+            selected: 0,
+            should_quit: false,
+            diff_cache: HashMap::new(),
+            diff_scroll: 0,
+            status_msg: None,
+            pending: None,
+            show_help: false,
+            edit_request: None,
+            focus: Pane::Status,
+            pending_g: false,
+            search: Search::Off,
+            mode: Mode::Review { spec, left, right },
+            reviewed: HashSet::new(),
+        })
+    }
+
+    pub fn is_review(&self) -> bool {
+        matches!(self.mode, Mode::Review { .. })
+    }
+
+    pub fn is_reviewed(&self, path: &Path) -> bool {
+        self.reviewed.contains(path)
+    }
+
+    pub fn reviewed_count(&self) -> usize {
+        self.files
+            .iter()
+            .filter(|f| self.reviewed.contains(&f.path))
+            .count()
+    }
+
+    pub fn toggle_reviewed(&mut self) {
+        if !self.is_review() {
+            return;
+        }
+        let Some(file) = self.files.get(self.selected) else {
+            return;
+        };
+        let path = file.path.clone();
+        if !self.reviewed.remove(&path) {
+            self.reviewed.insert(path);
+        }
     }
 
     pub fn search_start(&mut self) {
@@ -180,6 +243,10 @@ impl App {
     }
 
     pub fn request_edit(&mut self) {
+        if self.is_review() {
+            self.status_msg = Some("review mode is read-only".into());
+            return;
+        }
         let Some(file) = self.files.get(self.selected) else {
             return;
         };
@@ -191,6 +258,10 @@ impl App {
     }
 
     pub fn request_discard(&mut self) {
+        if self.is_review() {
+            self.status_msg = Some("review mode is read-only".into());
+            return;
+        }
         let Some(file) = self.files.get(self.selected) else {
             return;
         };
@@ -215,8 +286,24 @@ impl App {
                 self.refresh()?;
                 self.status_msg = Some("discarded".into());
             }
+            Confirm::Quit => {
+                self.should_quit = true;
+            }
         }
         Ok(())
+    }
+
+    pub fn request_quit(&mut self) {
+        if self.is_review() && self.reviewed_count() > 0 && self.pending.is_none() {
+            self.pending = Some(Confirm::Quit);
+            self.status_msg = Some(format!(
+                "quit with {}/{} reviewed? (y/n)",
+                self.reviewed_count(),
+                self.files.len()
+            ));
+        } else {
+            self.should_quit = true;
+        }
     }
 
     pub fn confirm_no(&mut self) {
@@ -226,7 +313,7 @@ impl App {
     }
 
     pub fn refresh(&mut self) -> Result<()> {
-        self.files = load_status(&self.repo)?;
+        self.reload_files()?;
         if self.selected >= self.files.len() {
             self.selected = self.files.len().saturating_sub(1);
         }
@@ -242,7 +329,7 @@ impl App {
             .get(self.selected)
             .map(|f| (f.path.clone(), f.section));
         let prev_scroll = self.diff_scroll;
-        self.files = load_status(&self.repo)?;
+        self.reload_files()?;
         self.diff_cache.clear();
         if let Some((path, section)) = prev {
             let new_idx = self
@@ -260,6 +347,21 @@ impl App {
             self.selected = self.files.len().saturating_sub(1);
         }
         self.diff_scroll = 0;
+        Ok(())
+    }
+
+    fn reload_files(&mut self) -> Result<()> {
+        let review_spec = match &self.mode {
+            Mode::Status => None,
+            Mode::Review { spec, .. } => Some(spec.clone()),
+        };
+        if let Some(spec) = review_spec {
+            let (left, right, files) = load_review(&self.repo, &spec)?;
+            self.files = files;
+            self.mode = Mode::Review { spec, left, right };
+        } else {
+            self.files = load_status(&self.repo)?;
+        }
         Ok(())
     }
 
@@ -285,8 +387,14 @@ impl App {
         let file = self.files.get(self.selected)?;
         let key = (file.path.clone(), file.section);
         if !self.diff_cache.contains_key(&key) {
-            let text = diff_for(&self.repo, &file.path, file.section)
-                .unwrap_or_else(|e| DiffText::Plain(format!("error computing diff: {e}")));
+            let text = match &self.mode {
+                Mode::Status => diff_for(&self.repo, &file.path, file.section)
+                    .unwrap_or_else(|e| DiffText::Plain(format!("error computing diff: {e}"))),
+                Mode::Review { left, right, .. } => {
+                    diff_for_review(&self.repo, file, *left, *right)
+                        .unwrap_or_else(|e| DiffText::Plain(format!("error computing diff: {e}")))
+                }
+            };
             self.diff_cache.insert(key.clone(), text);
         }
         self.diff_cache.get(&key)
@@ -315,6 +423,10 @@ impl App {
     }
 
     pub fn stage_selected(&mut self) -> Result<()> {
+        if self.is_review() {
+            self.status_msg = Some("review mode is read-only".into());
+            return Ok(());
+        }
         let Some(file) = self.files.get(self.selected).cloned() else {
             return Ok(());
         };
@@ -327,6 +439,10 @@ impl App {
     }
 
     pub fn unstage_selected(&mut self) -> Result<()> {
+        if self.is_review() {
+            self.status_msg = Some("review mode is read-only".into());
+            return Ok(());
+        }
         let Some(file) = self.files.get(self.selected).cloned() else {
             return Ok(());
         };
