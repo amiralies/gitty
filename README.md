@@ -22,7 +22,7 @@ Pass a revspec to view diffs between two revisions instead of the working tree:
 
 ```sh
 gitty master...HEAD       # everything on this branch since merge base
-gitty -r HEAD~3..HEAD     # last three commits
+gitty HEAD~3..HEAD        # last three commits
 gitty <commit-sha>        # a single commit vs its first parent
 ```
 

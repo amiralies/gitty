@@ -43,8 +43,7 @@ fn parse_args() -> Result<Option<String>, String> {
     match args.as_slice() {
         [] => Ok(None),
         [s] if !s.starts_with('-') => Ok(Some(s.clone())),
-        [flag, s] if flag == "-r" || flag == "--revisions" => Ok(Some(s.clone())),
-        _ => Err("Usage: gitty [<revspec>]\n       gitty -r <revspec>".into()),
+        _ => Err("Usage: gitty [<revspec>]".into()),
     }
 }
 
